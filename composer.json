@@ -1,0 +1,10 @@
+{
+  "name": "corestack/smtp_choice",
+  "type": "roundcube-plugin",
+  "license": "MIT",
+  "version": "1.0.0",
+  "description": "Per-login SMTP settings in Roundcube: test on save, send and reply via saved SMTP, or revert to default.",
+  "require": {
+    "roundcube/plugin-installer": ">=0.1.3"
+  }
+}

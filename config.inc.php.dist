@@ -1,0 +1,7 @@
+<?php
+
+// Empty = every Roundcube user sees Settings → SMTP sending.
+// Example: only one mailbox:
+// $config['smtp_choice_users'] = ['info@corestackdigi.com'];
+
+$config['smtp_choice_users'] = [];

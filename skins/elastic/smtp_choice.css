@@ -1,0 +1,45 @@
+#smtp-choice-form {
+  max-width: 36em;
+  padding: 1em 1.2em 2em;
+}
+
+#smtp-choice-form .propform-field {
+  margin: 0 0 0.9em;
+}
+
+#smtp-choice-form label {
+  display: block;
+  font-weight: bold;
+  margin: 0 0 0.35em;
+}
+
+#smtp-choice-form input[type="text"],
+#smtp-choice-form input[type="password"],
+#smtp-choice-form input[type="number"],
+#smtp-choice-form select {
+  width: 100%;
+  max-width: 28em;
+}
+
+.smtp-choice-radios {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+}
+
+.smtp-choice-radio {
+  font-weight: normal !important;
+}
+
+#smtp-choice-fields.disabled {
+  opacity: 0.45;
+}
+
+#smtp-choice-form .formbuttons {
+  margin-top: 1.2em;
+}
+
+#smtp-choice-form .hint {
+  color: #64748b;
+  font-size: 0.9em;
+}

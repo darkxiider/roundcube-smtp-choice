@@ -1,0 +1,33 @@
+<?php
+
+$labels['smtp_choice'] = 'SMTP sending';
+$labels['mode'] = 'Sending mode';
+$labels['mode_default'] = 'Default (this server)';
+$labels['mode_custom'] = 'Custom SMTP';
+$labels['email'] = 'Email';
+$labels['from_name'] = 'From name';
+$labels['smtp_host'] = 'SMTP host';
+$labels['smtp_port'] = 'Port';
+$labels['smtp_user'] = 'Username';
+$labels['smtp_pass'] = 'Password';
+$labels['smtp_secure'] = 'Encryption';
+$labels['secure_tls'] = 'STARTTLS (587 / 2525)';
+$labels['secure_ssl'] = 'SSL (465)';
+$labels['secure_none'] = 'None';
+$labels['save_test'] = 'Test and save';
+$labels['use_default'] = 'Use default';
+$labels['password_keep'] = 'Leave blank to keep the saved password';
+$labels['help'] = 'Saved SMTP is used for send and reply in Roundcube for this login only. Other apps still use the server unless you change them too.';
+$labels['saved'] = 'SMTP login worked. Settings saved.';
+$labels['reset_ok'] = 'Back to default server sending.';
+$labels['not_allowed'] = 'SMTP settings are not enabled for this account.';
+$labels['invalid_email'] = 'Enter a valid email address.';
+$labels['invalid_from_name'] = 'Enter a from name.';
+$labels['missing_smtp'] = 'Enter SMTP host and username.';
+$labels['invalid_port'] = 'Enter a valid port.';
+$labels['missing_password'] = 'Enter the SMTP password.';
+$labels['smtp_failed'] = 'SMTP test failed:';
+$labels['invalid_host'] = 'Invalid SMTP host.';
+$labels['host_unresolved'] = 'Could not resolve the SMTP host.';
+$labels['host_blocked'] = 'That SMTP host is not allowed.';
+$labels['tls_failed'] = 'STARTTLS failed.';
