@@ -305,7 +305,7 @@ class smtp_choice extends rcube_plugin
             . html::tag('button', [
                 'type'  => 'submit',
                 'id'    => 'sc-save',
-                'class' => 'button submit',
+                'class' => 'button',
             ], rcube::Q($this->gettext('save')))
         );
 

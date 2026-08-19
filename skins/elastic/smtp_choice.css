@@ -52,3 +52,9 @@
   display: flex;
   gap: 0.6em;
 }
+
+#smtp-choice-form .formbuttons button::before,
+#smtp-choice-form .formbuttons button::after {
+  content: none !important;
+  display: none !important;
+}
