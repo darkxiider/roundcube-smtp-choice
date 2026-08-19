@@ -1,95 +1,129 @@
-window.rcmail && rcmail.addEventListener('init', function () {
-  if (rcmail.env.task !== 'settings') {
-    return;
+window.smtpChoiceSetPort = function (enc) {
+  var port = document.getElementById('sc-port') || document.querySelector('#smtp-choice-form input[name="_port"]');
+  var map = { tls: '587', ssl: '465', none: '25' };
+  if (port) {
+    port.value = map[enc] || '587';
   }
+};
 
-  var form = document.getElementById('smtp-choice-form');
-  if (!form) {
-    return;
-  }
+(function () {
+  var bound = false;
 
-  var fields = document.getElementById('smtp-choice-fields');
-  var modeDefault = document.getElementById('sc-mode-default');
-  var modeCustom = document.getElementById('sc-mode-custom');
-  var testBtn = document.getElementById('sc-test');
-  var secure = document.getElementById('sc-secure');
-  var port = document.getElementById('sc-port');
-  var defaultPorts = { tls: '587', ssl: '465', none: '25' };
-
-  function setMode() {
-    var custom = modeCustom && modeCustom.checked;
-    if (fields) {
-      fields.classList.toggle('disabled', !custom);
+  function boot() {
+    var form = document.getElementById('smtp-choice-form');
+    if (!form || bound) {
+      return;
     }
-    var inputs = fields ? fields.querySelectorAll('input, select') : [];
-    for (var i = 0; i < inputs.length; i++) {
-      inputs[i].disabled = !custom;
-    }
-  }
+    bound = true;
 
-  function formData() {
-    return {
-      _token: rcmail.env.request_token,
-      _mode: modeCustom && modeCustom.checked ? 'custom' : 'default',
-      _email: document.getElementById('sc-email') ? document.getElementById('sc-email').value : '',
-      _from_name: document.getElementById('sc-from_name') ? document.getElementById('sc-from_name').value : '',
-      _host: document.getElementById('sc-host') ? document.getElementById('sc-host').value : '',
-      _port: document.getElementById('sc-port') ? document.getElementById('sc-port').value : '',
-      _user: document.getElementById('sc-user') ? document.getElementById('sc-user').value : '',
-      _pass: document.getElementById('sc-pass') ? document.getElementById('sc-pass').value : '',
-      _secure: document.getElementById('sc-secure') ? document.getElementById('sc-secure').value : 'tls'
-    };
-  }
+    var fields = document.getElementById('smtp-choice-fields');
+    var modeDefault = document.getElementById('sc-mode-default');
+    var modeCustom = document.getElementById('sc-mode-custom');
+    var testBtn = document.getElementById('sc-test');
+    var secure = document.getElementById('sc-secure') || form.querySelector('select[name="_secure"]');
 
-  if (modeDefault) {
-    modeDefault.addEventListener('change', setMode);
-  }
-  if (modeCustom) {
-    modeCustom.addEventListener('change', setMode);
-  }
-  setMode();
-
-  if (secure && port) {
-    secure.addEventListener('change', function () {
-      port.value = defaultPorts[secure.value] || '587';
-    });
-  }
-
-  form.addEventListener('submit', function (e) {
-    e.preventDefault();
-    var data = formData();
-    if (data._mode !== 'custom') {
-      data._email = '';
-      data._from_name = '';
-      data._host = '';
-      data._user = '';
-      data._pass = '';
-    } else {
+    function setMode() {
+      var custom = modeCustom && modeCustom.checked;
+      if (fields) {
+        fields.classList.toggle('disabled', !custom);
+      }
       var inputs = fields ? fields.querySelectorAll('input, select') : [];
       for (var i = 0; i < inputs.length; i++) {
-        inputs[i].disabled = false;
+        inputs[i].disabled = !custom;
       }
-      data = formData();
-      data._mode = 'custom';
     }
-    rcmail.http_post('plugin.smtp_choice.save', data, rcmail.set_busy(true, 'loading'));
-    setMode();
-  });
 
-  if (testBtn) {
-    testBtn.addEventListener('click', function () {
-      if (!modeCustom || !modeCustom.checked) {
-        rcmail.display_message(rcmail.gettext('test_need_custom', 'smtp_choice'), 'error');
+    function formData() {
+      var portEl = document.getElementById('sc-port') || form.querySelector('input[name="_port"]');
+      var secureEl = document.getElementById('sc-secure') || form.querySelector('select[name="_secure"]');
+      return {
+        _token: window.rcmail ? rcmail.env.request_token : '',
+        _mode: modeCustom && modeCustom.checked ? 'custom' : 'default',
+        _email: document.getElementById('sc-email') ? document.getElementById('sc-email').value : '',
+        _from_name: document.getElementById('sc-from_name') ? document.getElementById('sc-from_name').value : '',
+        _host: document.getElementById('sc-host') ? document.getElementById('sc-host').value : '',
+        _port: portEl ? portEl.value : '',
+        _user: document.getElementById('sc-user') ? document.getElementById('sc-user').value : '',
+        _pass: document.getElementById('sc-pass') ? document.getElementById('sc-pass').value : '',
+        _secure: secureEl ? secureEl.value : 'tls'
+      };
+    }
+
+    if (modeDefault) {
+      modeDefault.addEventListener('change', setMode);
+    }
+    if (modeCustom) {
+      modeCustom.addEventListener('change', setMode);
+    }
+    setMode();
+
+    form.addEventListener('change', function (e) {
+      var t = e.target;
+      if (t && (t.id === 'sc-secure' || t.name === '_secure')) {
+        window.smtpChoiceSetPort(t.value);
+      }
+    });
+
+    if (secure) {
+      secure.addEventListener('change', function () {
+        window.smtpChoiceSetPort(secure.value);
+      });
+      secure.addEventListener('input', function () {
+        window.smtpChoiceSetPort(secure.value);
+      });
+    }
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (!window.rcmail) {
         return;
       }
-      var inputs = fields ? fields.querySelectorAll('input, select') : [];
-      for (var i = 0; i < inputs.length; i++) {
-        inputs[i].disabled = false;
-      }
       var data = formData();
-      data._mode = 'custom';
-      rcmail.http_post('plugin.smtp_choice.test', data, rcmail.set_busy(true, 'loading'));
+      if (data._mode !== 'custom') {
+        data._email = '';
+        data._from_name = '';
+        data._host = '';
+        data._user = '';
+        data._pass = '';
+      } else {
+        var inputs = fields ? fields.querySelectorAll('input, select') : [];
+        for (var i = 0; i < inputs.length; i++) {
+          inputs[i].disabled = false;
+        }
+        data = formData();
+        data._mode = 'custom';
+      }
+      rcmail.http_post('plugin.smtp_choice.save', data, rcmail.set_busy(true, 'loading'));
       setMode();
     });
+
+    if (testBtn) {
+      testBtn.addEventListener('click', function () {
+        if (!window.rcmail) {
+          return;
+        }
+        if (!modeCustom || !modeCustom.checked) {
+          rcmail.display_message(rcmail.gettext('test_need_custom', 'smtp_choice'), 'error');
+          return;
+        }
+        var inputs = fields ? fields.querySelectorAll('input, select') : [];
+        for (var i = 0; i < inputs.length; i++) {
+          inputs[i].disabled = false;
+        }
+        var data = formData();
+        data._mode = 'custom';
+        rcmail.http_post('plugin.smtp_choice.test', data, rcmail.set_busy(true, 'loading'));
+        setMode();
+      });
+    }
   }
-});
+
+  if (window.rcmail) {
+    rcmail.addEventListener('init', boot);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+}());

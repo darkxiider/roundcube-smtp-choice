@@ -286,7 +286,11 @@ class smtp_choice extends rcube_plugin
             . $this->field('smtp_pass', '_pass', '', 'password', !empty($data['has_pass']) ? $this->gettext('password_keep') : '')
             . html::div(['class' => 'propform-field'],
                 html::label(['for' => 'sc-secure'], rcube::Q($this->gettext('smtp_secure')))
-                . html::tag('select', ['name' => '_secure', 'id' => 'sc-secure'],
+                . html::tag('select', [
+                    'name'     => '_secure',
+                    'id'       => 'sc-secure',
+                    'onchange' => 'window.smtpChoiceSetPort && window.smtpChoiceSetPort(this.value)',
+                ],
                     $this->option('tls', $data['secure'], $this->gettext('secure_tls'))
                     . $this->option('ssl', $data['secure'], $this->gettext('secure_ssl'))
                     . $this->option('none', $data['secure'], $this->gettext('secure_none'))
