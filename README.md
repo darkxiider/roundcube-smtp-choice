@@ -8,7 +8,9 @@ Send and reply in Roundcube then use that mailbox’s saved details. Outlook / p
 
 Custom SMTP is sent with the same login used by **Test** (AUTH LOGIN, one STARTTLS when Encryption is TLS). Do not use Roundcube’s built-in SMTP for those messages — that path can STARTTLS twice and providers such as SMTP2GO return `503 Authentication failed`.
 
-If **SSL 465** or **TLS 587** fail to connect from your host, use **TLS** or **None** on port **2525**.
+Preferred settings for SMTP2GO: **SSL**, port **465**, host `mail-eu.smtp2go.com`. Leave the password blank if it is already saved — browsers often fill the Roundcube mailbox password there, which SMTP2GO rejects with **535**.
+
+TLS on port **2525** is the fallback if SSL 465 cannot connect.
 
 ## Install (cPanel, root)
 

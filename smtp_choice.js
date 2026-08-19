@@ -77,6 +77,9 @@ window.smtpChoiceSetPort = function (enc) {
     if (secure) {
       secure.addEventListener('change', function () {
         window.smtpChoiceSetPort(secure.value);
+        if (passEl) {
+          passEl.value = '';
+        }
       });
       secure.addEventListener('input', function () {
         window.smtpChoiceSetPort(secure.value);

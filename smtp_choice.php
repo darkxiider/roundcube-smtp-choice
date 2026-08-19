@@ -143,6 +143,16 @@ class smtp_choice extends rcube_plugin
         }
 
         $test = $this->test_smtp($input['host'], $input['port'], $input['user'], $input['pass'], $input['secure']);
+        if (empty($test['ok']) && $this->is_auth_fail($test['error'])) {
+            $saved = $this->current_pass($this->prefs());
+            if ($saved !== '' && $saved !== $input['pass']) {
+                $retry = $this->test_smtp($input['host'], $input['port'], $input['user'], $saved, $input['secure']);
+                if (!empty($retry['ok'])) {
+                    $test = $retry;
+                    $input['pass'] = $saved;
+                }
+            }
+        }
         if (empty($test['ok'])) {
             $this->ajax_error($this->gettext('smtp_failed') . ' ' . $test['error']);
             return;
@@ -160,7 +170,7 @@ class smtp_choice extends rcube_plugin
         $host = $this->normalize_host((string) rcube_utils::get_input_value('_host', rcube_utils::INPUT_POST));
         $port = (int) rcube_utils::get_input_value('_port', rcube_utils::INPUT_POST);
         $user = trim((string) rcube_utils::get_input_value('_user', rcube_utils::INPUT_POST));
-        $pass = (string) rcube_utils::get_input_value('_pass', rcube_utils::INPUT_POST, true);
+        $pass = $this->posted_pass();
         $secure = (string) rcube_utils::get_input_value('_secure', rcube_utils::INPUT_POST);
         $secure = in_array($secure, ['ssl', 'tls', 'none'], true) ? $secure : 'tls';
 
@@ -178,8 +188,14 @@ class smtp_choice extends rcube_plugin
         }
 
         $prefs = $this->prefs();
+        $saved = $this->current_pass($prefs);
+        $imap = $this->mailbox_pass();
+        // Browsers often paste the Roundcube mailbox password into this field.
+        if ($pass !== '' && $imap !== '' && hash_equals($pass, $imap)) {
+            $pass = '';
+        }
         if ($pass === '') {
-            $pass = $this->current_pass($prefs);
+            $pass = $saved;
         }
         if ($pass === '') {
             return ['error' => $this->gettext('missing_password')];
@@ -195,6 +211,25 @@ class smtp_choice extends rcube_plugin
             'pass'      => $pass,
             'secure'    => $secure,
         ];
+    }
+
+    private function posted_pass()
+    {
+        $pass = (string) rcube_utils::get_input_value('_pass', rcube_utils::INPUT_POST, true);
+        return str_replace(["\r", "\n"], '', $pass);
+    }
+
+    private function mailbox_pass()
+    {
+        if (method_exists($this->rc, 'get_user_password')) {
+            return (string) $this->rc->get_user_password();
+        }
+        return '';
+    }
+
+    private function is_auth_fail($error)
+    {
+        return (bool) preg_match('/\b535\b|incorrect authentication|authentication failed/i', (string) $error);
     }
 
     function smtp_connect($args)
@@ -323,7 +358,16 @@ class smtp_choice extends rcube_plugin
             $this->field('email', '_email', $data['email'], 'text')
             . $this->field('from_name', '_from_name', $data['from_name'], 'text')
             . $this->field('smtp_host', '_host', $data['host'], 'text', 'smtp.example.com')
-            . $this->field('smtp_user', '_user', $data['user'], 'text')
+            .             $this->field('smtp_user', '_user', $data['user'], 'text')
+            . html::tag('input', [
+                'type'         => 'text',
+                'name'         => 'sc_trap_user',
+                'value'        => '',
+                'autocomplete' => 'username',
+                'tabindex'     => '-1',
+                'aria-hidden'  => 'true',
+                'style'        => 'position:absolute;left:-9999px;height:0;width:0;opacity:0',
+            ])
             . $this->field('smtp_pass', '_pass', '', 'password', !empty($data['has_pass']) ? $this->gettext('password_keep') : '')
             . html::div(['class' => 'propform-field'],
                 html::label(['for' => 'sc-secure'], rcube::Q($this->gettext('smtp_secure')))
@@ -377,6 +421,8 @@ class smtp_choice extends rcube_plugin
         if ($type === 'password') {
             $input_attr['autocomplete'] = 'new-password';
             $input_attr['readonly'] = 'readonly';
+            $input_attr['data-lpignore'] = 'true';
+            $input_attr['data-1p-ignore'] = 'true';
         }
 
         return html::div(['class' => 'propform-field'],
@@ -657,18 +703,19 @@ class smtp_choice extends rcube_plugin
             if ($p['code'] === 235) {
                 return ['ok' => true, 'error' => ''];
             }
-            $login_err = $p['text'];
-        } else {
-            $login_err = $auth['text'];
+            return ['ok' => false, 'error' => $p['text']];
         }
 
-        $this->smtp_write($fp, 'AUTH PLAIN ' . base64_encode("\0" . $user . "\0" . $pass));
-        $plain = $this->smtp_read($fp);
-        if ($plain['code'] === 235) {
-            return ['ok' => true, 'error' => ''];
+        if ($auth['code'] !== 334 && $auth['code'] !== 503) {
+            $this->smtp_write($fp, 'AUTH PLAIN ' . base64_encode("\0" . $user . "\0" . $pass));
+            $plain = $this->smtp_read($fp);
+            if ($plain['code'] === 235) {
+                return ['ok' => true, 'error' => ''];
+            }
+            return ['ok' => false, 'error' => $plain['text'] !== '' ? $plain['text'] : $auth['text']];
         }
 
-        return ['ok' => false, 'error' => $login_err !== '' ? $login_err : $plain['text']];
+        return ['ok' => false, 'error' => $auth['text']];
     }
 
     private function smtp_deliver($host, $port, $user, $pass, $secure, $from, $rcpts, $raw)
