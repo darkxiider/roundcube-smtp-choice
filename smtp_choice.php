@@ -209,6 +209,9 @@ class smtp_choice extends rcube_plugin
             return $args;
         }
 
+        // Compose uses smtp_deliver() instead. If another path still hits
+        // Roundcube SMTP, never pass tls:// — Roundcube STARTTLS in connect()
+        // and again in auth(), and SMTP2GO then returns 503.
         $host = $this->normalize_host((string) $prefs['host']);
         $port = (int) ($prefs['port'] ?? 587);
         $secure = (string) ($prefs['secure'] ?? 'tls');
@@ -242,6 +245,42 @@ class smtp_choice extends rcube_plugin
             elseif (method_exists($args['message'], 'headers')) {
                 $args['message']->headers(['From' => $from], true);
             }
+        }
+
+        $pass = $this->current_pass($prefs);
+        if ($pass === '') {
+            $args['abort'] = true;
+            $args['result'] = false;
+            $args['error'] = 'SMTP password is missing. Save SMTP settings again.';
+            return $args;
+        }
+
+        $raw = $this->message_rfc822($args['message'] ?? null);
+        if ($raw === '') {
+            $args['abort'] = true;
+            $args['result'] = false;
+            $args['error'] = 'Could not build the message.';
+            return $args;
+        }
+
+        $rcpts = $this->rcpt_list((string) ($args['mailto'] ?? ''), $raw);
+        $sent = $this->smtp_deliver(
+            $this->normalize_host((string) $prefs['host']),
+            (int) ($prefs['port'] ?? 587),
+            (string) $prefs['user'],
+            $pass,
+            (string) ($prefs['secure'] ?? 'tls'),
+            $email,
+            $rcpts,
+            $raw
+        );
+
+        $args['abort'] = true;
+        if (!empty($sent['ok'])) {
+            $args['result'] = true;
+        } else {
+            $args['result'] = false;
+            $args['error'] = $sent['error'] !== '' ? $sent['error'] : 'SMTP send failed.';
         }
 
         return $args;
@@ -464,112 +503,288 @@ class smtp_choice extends rcube_plugin
 
     private function rcube_smtp_host($host, $port, $secure)
     {
-        if (in_array($port, [465, 8465, 443], true)) {
-            return 'ssl://' . $host . ':' . $port;
-        }
-        if (in_array($port, [587, 2525, 2587, 8025], true)) {
-            return 'tls://' . $host . ':' . $port;
-        }
         if ($secure === 'ssl') {
             return 'ssl://' . $host . ':' . $port;
-        }
-        if ($secure === 'tls') {
-            return 'tls://' . $host . ':' . $port;
         }
         return $host . ':' . $port;
     }
 
     private function test_smtp($host, $port, $user, $pass, $secure)
     {
+        $open = $this->smtp_open($host, $port, $user, $pass, $secure);
+        if (empty($open['ok'])) {
+            return ['ok' => false, 'error' => $open['error']];
+        }
+        $this->smtp_write($open['fp'], 'QUIT');
+        fclose($open['fp']);
+        return ['ok' => true, 'error' => ''];
+    }
+
+    private function smtp_open($host, $port, $user, $pass, $secure)
+    {
         if (!preg_match('/^[a-z0-9.-]+$/i', $host)) {
-            return ['ok' => false, 'error' => $this->gettext('invalid_host')];
+            return ['ok' => false, 'error' => $this->gettext('invalid_host'), 'fp' => null];
         }
 
         $ips = @gethostbynamel($host);
         if (!is_array($ips) || $ips === []) {
-            return ['ok' => false, 'error' => $this->gettext('host_unresolved')];
+            return ['ok' => false, 'error' => $this->gettext('host_unresolved'), 'fp' => null];
         }
         foreach ($ips as $ip) {
             if (!$this->public_ip($ip)) {
-                return ['ok' => false, 'error' => $this->gettext('host_blocked')];
+                return ['ok' => false, 'error' => $this->gettext('host_blocked'), 'fp' => null];
             }
         }
 
-        $remote = ($secure === 'ssl' ? 'ssl://' : 'tcp://') . $host . ':' . $port;
-        $errno = 0;
-        $errstr = '';
+        $last = 'connect failed';
+        foreach ([true, false] as $verify) {
+            $fp = $this->smtp_connect_stream($host, $port, $secure, $verify, $last);
+            if (!$fp) {
+                continue;
+            }
+            stream_set_timeout($fp, 20);
+
+            $banner = $this->smtp_read($fp);
+            if ($banner['code'] !== 220) {
+                fclose($fp);
+                $last = $banner['text'] !== '' ? $banner['text'] : 'no SMTP banner';
+                continue;
+            }
+
+            $ehlo = $this->smtp_ehlo($fp);
+            if ($ehlo['code'] !== 250) {
+                fclose($fp);
+                $last = $ehlo['text'];
+                continue;
+            }
+
+            if ($secure === 'tls') {
+                $this->smtp_write($fp, 'STARTTLS');
+                $tls = $this->smtp_read($fp);
+                if ($tls['code'] !== 220) {
+                    fclose($fp);
+                    $last = $tls['text'];
+                    continue;
+                }
+                $crypto = @stream_socket_enable_crypto($fp, true, $this->crypto_method());
+                if ($crypto !== true) {
+                    fclose($fp);
+                    $last = $this->gettext('tls_failed');
+                    continue;
+                }
+                $ehlo = $this->smtp_ehlo($fp);
+                if ($ehlo['code'] !== 250) {
+                    fclose($fp);
+                    $last = $ehlo['text'];
+                    continue;
+                }
+            }
+
+            $auth = $this->smtp_auth($fp, $user, $pass);
+            if (empty($auth['ok'])) {
+                $this->smtp_write($fp, 'QUIT');
+                fclose($fp);
+                $last = $auth['error'];
+                continue;
+            }
+
+            return ['ok' => true, 'error' => '', 'fp' => $fp];
+        }
+
+        return ['ok' => false, 'error' => $last, 'fp' => null];
+    }
+
+    private function smtp_connect_stream($host, $port, $secure, $verify, &$last)
+    {
         $ctx = stream_context_create([
             'ssl' => [
-                'verify_peer'      => true,
-                'verify_peer_name' => true,
-                'allow_self_signed'=> false,
+                'verify_peer'       => $verify,
+                'verify_peer_name'  => $verify,
+                'allow_self_signed' => !$verify,
+                'peer_name'         => $host,
+                'SNI_enabled'       => true,
+                'crypto_method'     => $this->crypto_method(),
             ],
         ]);
-        $fp = @stream_socket_client($remote, $errno, $errstr, 12, STREAM_CLIENT_CONNECT, $ctx);
+        $errno = 0;
+        $errstr = '';
+        $timeout = 15;
+
+        if ($secure === 'ssl') {
+            $fp = @stream_socket_client('ssl://' . $host . ':' . $port, $errno, $errstr, $timeout, STREAM_CLIENT_CONNECT, $ctx);
+            if ($fp) {
+                return $fp;
+            }
+            $last = trim($errstr !== '' ? $errstr : "connect failed ($errno)");
+            $fp = @stream_socket_client('tcp://' . $host . ':' . $port, $errno, $errstr, $timeout, STREAM_CLIENT_CONNECT, $ctx);
+            if ($fp) {
+                $ok = @stream_socket_enable_crypto($fp, true, $this->crypto_method());
+                if ($ok === true) {
+                    return $fp;
+                }
+                fclose($fp);
+                $last = $this->gettext('tls_failed');
+            }
+            return false;
+        }
+
+        $fp = @stream_socket_client('tcp://' . $host . ':' . $port, $errno, $errstr, $timeout, STREAM_CLIENT_CONNECT, $ctx);
         if (!$fp) {
-            return ['ok' => false, 'error' => trim($errstr !== '' ? $errstr : "connect failed ($errno)")];
+            $last = trim($errstr !== '' ? $errstr : "connect failed ($errno)");
+            return false;
         }
-        stream_set_timeout($fp, 12);
+        return $fp;
+    }
 
-        $banner = $this->smtp_read($fp);
-        if ($banner['code'] !== 220) {
-            fclose($fp);
-            return ['ok' => false, 'error' => $banner['text']];
-        }
-
+    private function smtp_ehlo($fp)
+    {
         $this->smtp_write($fp, 'EHLO ' . $this->ehlo_name());
-        $ehlo = $this->smtp_read($fp);
-        if ($ehlo['code'] !== 250) {
-            fclose($fp);
-            return ['ok' => false, 'error' => $ehlo['text']];
-        }
+        return $this->smtp_read($fp);
+    }
 
-        if ($secure === 'tls') {
-            $this->smtp_write($fp, 'STARTTLS');
-            $tls = $this->smtp_read($fp);
-            if ($tls['code'] !== 220) {
-                fclose($fp);
-                return ['ok' => false, 'error' => $tls['text']];
-            }
-            $crypto = @stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
-            if ($crypto !== true) {
-                fclose($fp);
-                return ['ok' => false, 'error' => $this->gettext('tls_failed')];
-            }
-            $this->smtp_write($fp, 'EHLO ' . $this->ehlo_name());
-            $ehlo2 = $this->smtp_read($fp);
-            if ($ehlo2['code'] !== 250) {
-                fclose($fp);
-                return ['ok' => false, 'error' => $ehlo2['text']];
-            }
-        }
-
+    private function smtp_auth($fp, $user, $pass)
+    {
         $this->smtp_write($fp, 'AUTH LOGIN');
         $auth = $this->smtp_read($fp);
-        if ($auth['code'] !== 334) {
-            fclose($fp);
-            return ['ok' => false, 'error' => $auth['text']];
+        if ($auth['code'] === 334) {
+            $this->smtp_write($fp, base64_encode($user));
+            $u = $this->smtp_read($fp);
+            if ($u['code'] !== 334) {
+                return ['ok' => false, 'error' => $u['text']];
+            }
+            $this->smtp_write($fp, base64_encode($pass));
+            $p = $this->smtp_read($fp);
+            if ($p['code'] === 235) {
+                return ['ok' => true, 'error' => ''];
+            }
+            $login_err = $p['text'];
+        } else {
+            $login_err = $auth['text'];
         }
-        $this->smtp_write($fp, base64_encode($user));
-        $u = $this->smtp_read($fp);
-        if ($u['code'] !== 334) {
-            fclose($fp);
-            return ['ok' => false, 'error' => $u['text']];
+
+        $this->smtp_write($fp, 'AUTH PLAIN ' . base64_encode("\0" . $user . "\0" . $pass));
+        $plain = $this->smtp_read($fp);
+        if ($plain['code'] === 235) {
+            return ['ok' => true, 'error' => ''];
         }
-        $this->smtp_write($fp, base64_encode($pass));
-        $p = $this->smtp_read($fp);
+
+        return ['ok' => false, 'error' => $login_err !== '' ? $login_err : $plain['text']];
+    }
+
+    private function smtp_deliver($host, $port, $user, $pass, $secure, $from, $rcpts, $raw)
+    {
+        if (!is_array($rcpts) || $rcpts === []) {
+            return ['ok' => false, 'error' => 'No recipients.'];
+        }
+
+        $open = $this->smtp_open($host, $port, $user, $pass, $secure);
+        if (empty($open['ok'])) {
+            return ['ok' => false, 'error' => $open['error']];
+        }
+        $fp = $open['fp'];
+
+        $this->smtp_write($fp, 'MAIL FROM:<' . $from . '>');
+        $mail = $this->smtp_read($fp);
+        if ($mail['code'] !== 250) {
+            $this->smtp_write($fp, 'QUIT');
+            fclose($fp);
+            return ['ok' => false, 'error' => $mail['text']];
+        }
+
+        foreach ($rcpts as $rcpt) {
+            $this->smtp_write($fp, 'RCPT TO:<' . $rcpt . '>');
+            $to = $this->smtp_read($fp);
+            if ($to['code'] !== 250 && $to['code'] !== 251) {
+                $this->smtp_write($fp, 'QUIT');
+                fclose($fp);
+                return ['ok' => false, 'error' => $to['text']];
+            }
+        }
+
+        $this->smtp_write($fp, 'DATA');
+        $data = $this->smtp_read($fp);
+        if ($data['code'] !== 354) {
+            $this->smtp_write($fp, 'QUIT');
+            fclose($fp);
+            return ['ok' => false, 'error' => $data['text']];
+        }
+
+        $payload = preg_replace("/(?<!\r)\n/", "\r\n", $raw);
+        $payload = preg_replace('/^\./m', '..', $payload);
+        if (substr($payload, -2) !== "\r\n") {
+            $payload .= "\r\n";
+        }
+        fwrite($fp, $payload . ".\r\n");
+        $done = $this->smtp_read($fp);
         $this->smtp_write($fp, 'QUIT');
         fclose($fp);
 
-        if ($p['code'] !== 235) {
-            return ['ok' => false, 'error' => $p['text']];
+        if ($done['code'] !== 250) {
+            return ['ok' => false, 'error' => $done['text']];
         }
-
         return ['ok' => true, 'error' => ''];
+    }
+
+    private function message_rfc822($message)
+    {
+        if (!is_object($message)) {
+            return '';
+        }
+        if (method_exists($message, 'getMessage')) {
+            $raw = $message->getMessage();
+            if (is_string($raw) && trim($raw) !== '') {
+                return $raw;
+            }
+        }
+        $headers = method_exists($message, 'txtHeaders') ? (string) $message->txtHeaders() : '';
+        $body = '';
+        if (method_exists($message, 'get')) {
+            $body = (string) $message->get();
+        } elseif (method_exists($message, 'getTXTBody')) {
+            $body = (string) $message->getTXTBody();
+        }
+        $raw = trim($headers) !== '' ? rtrim($headers) . "\r\n\r\n" . $body : $body;
+        return is_string($raw) ? $raw : '';
+    }
+
+    private function rcpt_list($mailto, $raw)
+    {
+        $found = [];
+        $chunks = preg_split('/[,;]+/', (string) $mailto);
+        foreach ($chunks as $chunk) {
+            if (preg_match('/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/i', $chunk, $m)) {
+                $found[strtolower($m[0])] = $m[0];
+            }
+        }
+        if (preg_match_all('/^(To|Cc|Bcc):(.+)$/im', (string) $raw, $mm, PREG_SET_ORDER)) {
+            foreach ($mm as $row) {
+                if (preg_match_all('/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/i', $row[2], $em)) {
+                    foreach ($em[0] as $email) {
+                        $found[strtolower($email)] = $email;
+                    }
+                }
+            }
+        }
+        return array_values($found);
+    }
+
+    private function crypto_method()
+    {
+        $method = 0;
+        if (defined('STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT')) {
+            $method |= STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT;
+        }
+        if (defined('STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT')) {
+            $method |= STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT;
+        }
+        return $method ?: STREAM_CRYPTO_METHOD_TLS_CLIENT;
     }
 
     private function public_ip($ip)
     {
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            return (bool) filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+        }
         $flags = FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE;
         return (bool) filter_var($ip, FILTER_VALIDATE_IP, $flags);
     }

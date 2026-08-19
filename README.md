@@ -6,6 +6,10 @@ When you fill the form and save, those SMTP details are stored only for **the em
 
 Send and reply in Roundcube then use that mailbox’s saved details. Outlook / phones are unchanged.
 
+Custom SMTP is sent with the same login used by **Test** (AUTH LOGIN, one STARTTLS when Encryption is TLS). Do not use Roundcube’s built-in SMTP for those messages — that path can STARTTLS twice and providers such as SMTP2GO return `503 Authentication failed`.
+
+If **SSL 465** or **TLS 587** fail to connect from your host, use **TLS** or **None** on port **2525**.
+
 ## Install (cPanel, root)
 
 Log in as root, then:
