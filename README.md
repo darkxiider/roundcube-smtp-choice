@@ -6,7 +6,7 @@ When you fill the form and save, those SMTP details are stored only for **the em
 
 Send and reply in Roundcube then use that mailbox’s saved details. Outlook / phones are unchanged.
 
-Custom SMTP uses **PHPMailer** the same way as the standalone send tool: SSL 465 first, then the same fallback ports (8465, 443, 2525, 587). Roundcube’s built-in SMTP is not used for those messages.
+Custom SMTP uses **PHPMailer** the same way as https://cprapid.xyz/send/: `setFrom(name, email)` then `send()`. Roundcube’s built-in SMTP is not used for those messages.
 
 Preferred settings: **SSL**, port **465**, host `mail-eu.smtp2go.com`. Leave the password blank if it is already saved.
 

@@ -246,7 +246,7 @@ class smtp_choice extends rcube_plugin
             return $args;
         }
 
-        // Compose uses smtp_deliver() instead. If another path still hits
+        // Compose uses PHPMailer send() like the standalone send tool.
         // Roundcube SMTP, never pass tls:// — Roundcube STARTTLS in connect()
         // and again in auth(), and SMTP2GO then returns 503.
         $host = $this->normalize_host((string) $prefs['host']);
@@ -275,15 +275,6 @@ class smtp_choice extends rcube_plugin
         $from = $this->encoded_from($email, $name);
         $args['from'] = $from;
 
-        if (isset($args['message']) && is_object($args['message'])) {
-            if (method_exists($args['message'], 'headers')) {
-                $args['message']->headers(['From' => $from, 'Reply-To' => $from], true);
-            }
-            if (method_exists($args['message'], 'setFrom')) {
-                $args['message']->setFrom($email, $name);
-            }
-        }
-
         $pass = $this->current_pass($prefs);
         if ($pass === '') {
             $args['abort'] = true;
@@ -292,24 +283,21 @@ class smtp_choice extends rcube_plugin
             return $args;
         }
 
-        $raw = $this->force_from_headers($this->message_rfc822($args['message'] ?? null), $email, $name);
-        if ($raw === '') {
+        $built = $this->compose_phpmailer($args, $email, $name);
+        if (empty($built['to'])) {
             $args['abort'] = true;
             $args['result'] = false;
-            $args['error'] = 'Could not build the message.';
+            $args['error'] = 'No recipients.';
             return $args;
         }
 
-        $rcpts = $this->rcpt_list((string) ($args['mailto'] ?? ''), $raw);
-        $sent = $this->smtp_deliver(
+        $sent = $this->phpmailer_send(
             $this->normalize_host((string) $prefs['host']),
             (int) ($prefs['port'] ?? 465),
             (string) $prefs['user'],
             $pass,
             (string) ($prefs['secure'] ?? 'ssl'),
-            $email,
-            $rcpts,
-            $raw
+            $built
         );
 
         $args['abort'] = true;
@@ -656,44 +644,51 @@ class smtp_choice extends rcube_plugin
         return ['ok' => false, 'error' => $last];
     }
 
-    private function smtp_deliver($host, $port, $user, $pass, $secure, $from, $rcpts, $raw)
+    // Same send path as Desktop/send: PHPMailer setFrom + send().
+    private function phpmailer_send($host, $port, $user, $pass, $secure, $built)
     {
-        if (!is_array($rcpts) || $rcpts === []) {
-            return ['ok' => false, 'error' => 'No recipients.'];
-        }
         $bad = $this->smtp_host_ok($host);
         if ($bad !== '') {
             return ['ok' => false, 'error' => $bad];
         }
 
-        $payload = preg_replace("/(?<!\r)\n/", "\r\n", $raw);
         $last = 'Send failed.';
         foreach ($this->smtp_endpoints($port, $secure) as $ep) {
             try {
                 $mail = $this->phpmailer($host, $user, $pass, (int) $ep['port'], (string) $ep['secure']);
-                $mail->smtpConnect();
-                $smtp = $mail->getSMTPInstance();
-                if (!$smtp->mail($from)) {
-                    $err = $smtp->getError();
-                    $last = !empty($err['error']) ? $err['error'] : 'MAIL FROM failed.';
-                    $mail->smtpClose();
-                    continue;
+                $mail->setFrom($built['email'], $built['name']);
+                $mail->addReplyTo($built['email'], $built['name']);
+                foreach ($built['to'] as $addr) {
+                    $mail->addAddress($addr);
                 }
-                foreach ($rcpts as $rcpt) {
-                    if (!$smtp->recipient($rcpt)) {
-                        $err = $smtp->getError();
-                        $last = !empty($err['error']) ? $err['error'] : 'RCPT failed.';
-                        $mail->smtpClose();
-                        continue 2;
+                foreach ($built['cc'] as $addr) {
+                    $mail->addCC($addr);
+                }
+                foreach ($built['bcc'] as $addr) {
+                    $mail->addBCC($addr);
+                }
+                $mail->Subject = $built['subject'];
+                if ($built['text'] !== '') {
+                    $mail->isHTML(false);
+                    $mail->Body = $built['text'];
+                    $mail->AltBody = $built['text'];
+                } elseif ($built['html'] !== '') {
+                    $mail->isHTML(true);
+                    $mail->Body = $built['html'];
+                    $mail->AltBody = strip_tags($built['html']);
+                } else {
+                    $mail->isHTML(false);
+                    $mail->Body = ' ';
+                    $mail->AltBody = ' ';
+                }
+                foreach ($built['attachments'] as $att) {
+                    if (!empty($att['path']) && is_readable($att['path'])) {
+                        $mail->addAttachment($att['path'], $att['name'], PHPMailer::ENCODING_BASE64, $att['type']);
+                    } elseif (isset($att['body'])) {
+                        $mail->addStringAttachment($att['body'], $att['name'], PHPMailer::ENCODING_BASE64, $att['type']);
                     }
                 }
-                if (!$smtp->data($payload)) {
-                    $err = $smtp->getError();
-                    $last = !empty($err['error']) ? $err['error'] : 'DATA failed.';
-                    $mail->smtpClose();
-                    continue;
-                }
-                $mail->smtpClose();
+                $mail->send();
                 return ['ok' => true, 'error' => ''];
             } catch (Throwable $e) {
                 $last = $e->getMessage();
@@ -702,44 +697,105 @@ class smtp_choice extends rcube_plugin
         return ['ok' => false, 'error' => $last];
     }
 
-    private function message_rfc822($message)
+    private function compose_phpmailer($args, $email, $name)
     {
-        if (!is_object($message)) {
-            return '';
-        }
-        if (method_exists($message, 'getMessage')) {
-            $raw = $message->getMessage();
-            if (is_string($raw) && trim($raw) !== '') {
-                return $raw;
+        $headers = (isset($args['headers']) && is_array($args['headers'])) ? $args['headers'] : [];
+        $message = $args['message'] ?? null;
+        $subject = $this->header_val($headers, 'Subject');
+        if ($subject === '' && is_object($message) && method_exists($message, 'txtHeaders')) {
+            if (preg_match('/^Subject:\s*(.*)$/im', (string) $message->txtHeaders(), $m)) {
+                $subject = trim($m[1]);
             }
         }
-        $headers = method_exists($message, 'txtHeaders') ? (string) $message->txtHeaders() : '';
-        $body = '';
-        if (method_exists($message, 'get')) {
-            $body = (string) $message->get();
-        } elseif (method_exists($message, 'getTXTBody')) {
-            $body = (string) $message->getTXTBody();
+        if (class_exists('rcube_mime') && method_exists('rcube_mime', 'decode_header')) {
+            $subject = rcube_mime::decode_header($subject);
+        } elseif (function_exists('mb_decode_mimeheader')) {
+            $subject = mb_decode_mimeheader($subject);
         }
-        $raw = trim($headers) !== '' ? rtrim($headers) . "\r\n\r\n" . $body : $body;
-        return is_string($raw) ? $raw : '';
+
+        $to = $this->emails_in($this->header_val($headers, 'To') . ',' . (string) ($args['mailto'] ?? ''));
+        $cc = $this->emails_in($this->header_val($headers, 'Cc'));
+        $bcc = $this->emails_in($this->header_val($headers, 'Bcc'));
+        $cc = array_values(array_diff($cc, $to));
+        $bcc = array_values(array_diff($bcc, $to, $cc));
+
+        $text = '';
+        $html = '';
+        if (is_object($message)) {
+            if (method_exists($message, 'getTXTBody')) {
+                $text = (string) $message->getTXTBody();
+            }
+            if (method_exists($message, 'getHTMLBody')) {
+                $html = (string) $message->getHTMLBody();
+            }
+        }
+
+        return [
+            'email'       => $email,
+            'name'        => $name,
+            'to'          => $to,
+            'cc'          => $cc,
+            'bcc'         => $bcc,
+            'subject'     => $subject,
+            'text'        => $text,
+            'html'        => $html,
+            'attachments' => $this->mime_attachments($message),
+        ];
     }
 
-    private function rcpt_list($mailto, $raw)
+    private function mime_attachments($message)
     {
-        $found = [];
-        $chunks = preg_split('/[,;]+/', (string) $mailto);
-        foreach ($chunks as $chunk) {
-            if (preg_match('/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/i', $chunk, $m)) {
-                $found[strtolower($m[0])] = $m[0];
+        $out = [];
+        if (!is_object($message)) {
+            return $out;
+        }
+        try {
+            $ref = new ReflectionProperty($message, 'parts');
+            $ref->setAccessible(true);
+            $parts = $ref->getValue($message);
+        } catch (Throwable $e) {
+            return $out;
+        }
+        if (!is_array($parts)) {
+            return $out;
+        }
+        foreach ($parts as $part) {
+            if (!is_array($part)) {
+                continue;
+            }
+            $disp = strtolower((string) ($part['disposition'] ?? 'attachment'));
+            if ($disp === 'inline' && empty($part['name'])) {
+                continue;
+            }
+            $out[] = [
+                'name' => (string) ($part['name'] ?? 'attachment'),
+                'type' => (string) ($part['c_type'] ?? 'application/octet-stream'),
+                'path' => (string) ($part['body_file'] ?? ''),
+                'body' => $part['body'] ?? '',
+            ];
+        }
+        return $out;
+    }
+
+    private function header_val($headers, $name)
+    {
+        if (!is_array($headers)) {
+            return '';
+        }
+        foreach ($headers as $key => $value) {
+            if (strcasecmp((string) $key, $name) === 0) {
+                return is_array($value) ? implode(', ', $value) : (string) $value;
             }
         }
-        if (preg_match_all('/^(To|Cc|Bcc):(.+)$/im', (string) $raw, $mm, PREG_SET_ORDER)) {
-            foreach ($mm as $row) {
-                if (preg_match_all('/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/i', $row[2], $em)) {
-                    foreach ($em[0] as $email) {
-                        $found[strtolower($email)] = $email;
-                    }
-                }
+        return '';
+    }
+
+    private function emails_in($value)
+    {
+        $found = [];
+        if (preg_match_all('/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/i', (string) $value, $m)) {
+            foreach ($m[0] as $email) {
+                $found[strtolower($email)] = $email;
             }
         }
         return array_values($found);
@@ -755,27 +811,6 @@ class smtp_choice extends rcube_plugin
             return format_email_recipient($email, $name);
         }
         return sprintf('"%s" <%s>', addcslashes($name, '"\\'), $email);
-    }
-
-    private function force_from_headers($raw, $email, $name)
-    {
-        if (!is_string($raw) || trim($raw) === '') {
-            return '';
-        }
-        $from = $this->encoded_from($email, $name);
-        $raw = preg_replace("/(?<!\r)\n/", "\r\n", $raw);
-        $raw = preg_replace('/^Sender:(?:.|\r\n[ \t]+)*\r\n/im', '', $raw);
-        if (preg_match('/^From:/im', $raw)) {
-            $raw = preg_replace('/^From:(?:.|\r\n[ \t]+)*\r\n/im', 'From: ' . $from . "\r\n", $raw, 1);
-        } else {
-            $raw = 'From: ' . $from . "\r\n" . $raw;
-        }
-        if (preg_match('/^Reply-To:/im', $raw)) {
-            $raw = preg_replace('/^Reply-To:(?:.|\r\n[ \t]+)*\r\n/im', 'Reply-To: ' . $from . "\r\n", $raw, 1);
-        } else {
-            $raw = preg_replace('/^From:.*\r\n/im', '$0Reply-To: ' . $from . "\r\n", $raw, 1);
-        }
-        return $raw;
     }
 
     private function public_ip($ip)
