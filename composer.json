@@ -1,5 +1,5 @@
 {
-  "name": "corestack/smtp_choice",
+  "name": "roundcube-smtp-choice/smtp_choice",
   "type": "roundcube-plugin",
   "license": "MIT",
   "version": "1.0.0",

@@ -23,13 +23,13 @@ curl -fsSL https://raw.githubusercontent.com/darkxiider/roundcube-smtp-choice/ma
 One line (replace the host if needed):
 
 ```bash
-ssh root@panel.cprapid.xyz 'curl -fsSL https://raw.githubusercontent.com/darkxiider/roundcube-smtp-choice/main/install.sh | bash'
+ssh root@your-server.example.com 'curl -fsSL https://raw.githubusercontent.com/darkxiider/roundcube-smtp-choice/main/install.sh | bash'
 ```
 
 Or SSH in first, then use the same command as PuTTY:
 
 ```bash
-ssh root@panel.cprapid.xyz
+ssh root@your-server.example.com
 ```
 
 ```bash

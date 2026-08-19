@@ -1,5 +1,8 @@
 <?php
 
-// Leave this empty. Every Roundcube login sees Settings → SMTP sending.
+// Leave empty so every Roundcube login sees Settings → SMTP sending.
 // Each mailbox stores its own SMTP. Saving one account does not change others.
 $config['smtp_choice_users'] = [];
+
+// Example only:
+// $config['smtp_choice_users'] = ['user@example.com'];
