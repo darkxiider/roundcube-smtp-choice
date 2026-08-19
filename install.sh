@@ -63,6 +63,5 @@ chmod 644 "$ENABLE"
 php -l "$DEST/smtp_choice.php" >/dev/null
 
 echo
-echo "Installed. In Roundcube open Settings -> SMTP sending."
-echo "Optional: copy $DEST/config.inc.php.dist to $DEST/config.inc.php"
-echo "and set smtp_choice_users to one mailbox if you want to hide it from others."
+echo "Installed. Every Roundcube mailbox gets Settings -> SMTP sending."
+echo "Saved SMTP applies only to the mailbox that saved it."

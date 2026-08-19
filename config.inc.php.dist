@@ -1,7 +1,5 @@
 <?php
 
-// Empty = every Roundcube user sees Settings → SMTP sending.
-// Example: only one mailbox:
-// $config['smtp_choice_users'] = ['info@corestackdigi.com'];
-
+// Leave this empty. Every Roundcube login sees Settings → SMTP sending.
+// Each mailbox stores its own SMTP. Saving one account does not change others.
 $config['smtp_choice_users'] = [];

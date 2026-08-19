@@ -1,8 +1,10 @@
 # Roundcube SMTP sending
 
-cPanel Roundcube plugin. **Settings → SMTP sending** lets one mailbox save custom SMTP (test on save) or switch back to the server default.
+cPanel Roundcube plugin. **Settings → SMTP sending** appears for **every** mailbox.
 
-Send and reply in Roundcube then use those details. Outlook / phones are unchanged.
+When you fill the form and save, those SMTP details are stored only for **the email you logged in with**. Other mailboxes still use the server until they save their own SMTP.
+
+Send and reply in Roundcube then use that mailbox’s saved details. Outlook / phones are unchanged.
 
 ## Install (cPanel, root)
 
@@ -34,22 +36,7 @@ ssh root@panel.cprapid.xyz
 curl -fsSL https://raw.githubusercontent.com/darkxiider/roundcube-smtp-choice/main/install.sh | bash
 ```
 
-After install: log into Roundcube → Settings → **SMTP sending**.
-
-## Optional: only one mailbox
-
-```bash
-cp /usr/local/cpanel/base/3rdparty/roundcube/plugins/smtp_choice/config.inc.php.dist \
-   /usr/local/cpanel/base/3rdparty/roundcube/plugins/smtp_choice/config.inc.php
-```
-
-Edit `config.inc.php`:
-
-```php
-$config['smtp_choice_users'] = ['sales@yourdomain.com'];
-```
-
-Empty array = every Roundcube user sees the menu (each login has its own saved SMTP).
+After install: log into any Roundcube mailbox → Settings → **SMTP sending**.
 
 ## Uninstall
 
