@@ -6,11 +6,9 @@ When you fill the form and save, those SMTP details are stored only for **the em
 
 Send and reply in Roundcube then use that mailbox’s saved details. Outlook / phones are unchanged.
 
-Custom SMTP is sent with the same login used by **Test** (AUTH LOGIN, one STARTTLS when Encryption is TLS). Do not use Roundcube’s built-in SMTP for those messages — that path can STARTTLS twice and providers such as SMTP2GO return `503 Authentication failed`.
+Custom SMTP uses **PHPMailer** the same way as the standalone send tool: SSL 465 first, then the same fallback ports (8465, 443, 2525, 587). Roundcube’s built-in SMTP is not used for those messages.
 
-Preferred settings for SMTP2GO: **SSL**, port **465**, host `mail-eu.smtp2go.com`. Leave the password blank if it is already saved — browsers often fill the Roundcube mailbox password there, which SMTP2GO rejects with **535**.
-
-TLS on port **2525** is the fallback if SSL 465 cannot connect.
+Preferred settings: **SSL**, port **465**, host `mail-eu.smtp2go.com`. Leave the password blank if it is already saved.
 
 ## Install (cPanel, root)
 

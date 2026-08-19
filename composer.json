@@ -2,8 +2,8 @@
   "name": "roundcube-smtp-choice/smtp_choice",
   "type": "roundcube-plugin",
   "license": "MIT",
-  "version": "1.0.0",
-  "description": "Per-login SMTP settings in Roundcube: test on save, send and reply via saved SMTP, or revert to default.",
+  "version": "1.1.0",
+  "description": "Per-login SMTP in Roundcube using PHPMailer (same method as the standalone send tool).",
   "require": {
     "roundcube/plugin-installer": ">=0.1.3"
   }

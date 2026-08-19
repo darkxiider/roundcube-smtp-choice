@@ -52,6 +52,10 @@ cp -a "$TMP/src/composer.json" "$DEST/"
 cp -a "$TMP/src/config.inc.php.dist" "$DEST/"
 cp -a "$TMP/src/localization/." "$DEST/localization/"
 cp -a "$TMP/src/skins/." "$DEST/skins/"
+if [[ -d "$TMP/src/lib" ]]; then
+  mkdir -p "$DEST/lib"
+  cp -a "$TMP/src/lib/." "$DEST/lib/"
+fi
 
 printf '%s\n' '<?php' "array_push(\$config['plugins'], 'smtp_choice');" > "$ENABLE"
 
