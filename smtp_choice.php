@@ -99,6 +99,7 @@ class smtp_choice extends rcube_plugin
         $mode = (string) rcube_utils::get_input_value('_mode', rcube_utils::INPUT_POST);
         if ($mode !== 'custom') {
             $this->rc->user->save_prefs(['smtp_choice' => ['enabled' => false]]);
+            $this->remember_pass('');
             $this->rc->output->command('display_message', $this->gettext('reset_ok'), 'confirmation');
             $this->rc->output->send();
             return;
@@ -118,10 +119,11 @@ class smtp_choice extends rcube_plugin
                 'host'      => $input['host'],
                 'port'      => $input['port'],
                 'user'      => $input['user'],
-                'pass'      => $this->rc->encrypt($input['pass']),
+                'pass'      => $this->encode_pass($input['pass']),
                 'secure'    => $input['secure'],
             ],
         ]);
+        $this->remember_pass($input['pass']);
 
         $this->rc->output->command('display_message', $this->gettext('saved'), 'confirmation');
         $this->rc->output->send();
@@ -146,6 +148,7 @@ class smtp_choice extends rcube_plugin
             return;
         }
 
+        $this->remember_pass($input['pass']);
         $this->rc->output->command('display_message', $this->gettext('tested_ok'), 'confirmation');
         $this->rc->output->send();
     }
@@ -175,8 +178,8 @@ class smtp_choice extends rcube_plugin
         }
 
         $prefs = $this->prefs();
-        if ($pass === '' && !empty($prefs['pass'])) {
-            $pass = $this->rc->decrypt($prefs['pass']);
+        if ($pass === '') {
+            $pass = $this->current_pass($prefs);
         }
         if ($pass === '') {
             return ['error' => $this->gettext('missing_password')];
@@ -201,8 +204,8 @@ class smtp_choice extends rcube_plugin
             return $args;
         }
 
-        $pass = $this->rc->decrypt((string) ($prefs['pass'] ?? ''));
-        if ($pass === '' || $pass === false) {
+        $pass = $this->current_pass($prefs);
+        if ($pass === '') {
             return $args;
         }
 
@@ -212,7 +215,6 @@ class smtp_choice extends rcube_plugin
         $args['smtp_host'] = $this->rcube_smtp_host($host, $port, $secure);
         $args['smtp_user'] = (string) $prefs['user'];
         $args['smtp_pass'] = $pass;
-        $args['smtp_auth_type'] = 'LOGIN';
 
         return $args;
     }
@@ -247,7 +249,7 @@ class smtp_choice extends rcube_plugin
 
     private function render_form($data)
     {
-        $attr = ['id' => 'smtp-choice-form', 'class' => 'propform', 'method' => 'post', 'action' => '#'];
+        $attr = ['id' => 'smtp-choice-form', 'class' => 'propform', 'method' => 'post', 'action' => '#', 'autocomplete' => 'off'];
         $hidden = html::tag('input', [
             'type'  => 'hidden',
             'name'  => '_token',
@@ -333,6 +335,10 @@ class smtp_choice extends rcube_plugin
             $input_attr['pattern'] = '[0-9]*';
             $input_attr['autocomplete'] = 'off';
         }
+        if ($type === 'password') {
+            $input_attr['autocomplete'] = 'new-password';
+            $input_attr['readonly'] = 'readonly';
+        }
 
         return html::div(['class' => 'propform-field'],
             html::label(['for' => $id], rcube::Q($this->gettext($label_key)))
@@ -353,6 +359,71 @@ class smtp_choice extends rcube_plugin
     {
         $prefs = $this->rc->config->get('smtp_choice', []);
         return is_array($prefs) ? $prefs : [];
+    }
+
+    private function pass_key()
+    {
+        $des = (string) $this->rc->config->get('des_key', '');
+        $user = (string) $this->rc->get_user_name();
+        return hash('sha256', 'smtp_choice|' . $des . '|' . $user, true);
+    }
+
+    private function encode_pass($plain)
+    {
+        $iv = random_bytes(16);
+        $raw = openssl_encrypt($plain, 'AES-256-CBC', $this->pass_key(), OPENSSL_RAW_DATA, $iv);
+        if ($raw === false) {
+            return 'b64:' . base64_encode($plain);
+        }
+        return 'v1:' . base64_encode($iv . $raw);
+    }
+
+    private function decode_pass($stored)
+    {
+        if (!is_string($stored) || $stored === '') {
+            return '';
+        }
+        if (strncmp($stored, 'v1:', 3) === 0) {
+            $bin = base64_decode(substr($stored, 3), true);
+            if ($bin === false || strlen($bin) < 17) {
+                return '';
+            }
+            $plain = openssl_decrypt(substr($bin, 16), 'AES-256-CBC', $this->pass_key(), OPENSSL_RAW_DATA, substr($bin, 0, 16));
+            return is_string($plain) ? $plain : '';
+        }
+        if (strncmp($stored, 'b64:', 4) === 0) {
+            $plain = base64_decode(substr($stored, 4), true);
+            return is_string($plain) ? $plain : '';
+        }
+        $dec = $this->rc->decrypt($stored);
+        if (is_string($dec) && $dec !== '' && $dec !== $stored) {
+            return $dec;
+        }
+        return '';
+    }
+
+    private function remember_pass($plain)
+    {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            return;
+        }
+        if ($plain === '') {
+            unset($_SESSION['smtp_choice_pass']);
+            return;
+        }
+        $_SESSION['smtp_choice_pass'] = $plain;
+    }
+
+    private function current_pass($prefs)
+    {
+        $stored = $this->decode_pass((string) ($prefs['pass'] ?? ''));
+        if ($stored !== '') {
+            return $stored;
+        }
+        if (session_status() === PHP_SESSION_ACTIVE && !empty($_SESSION['smtp_choice_pass'])) {
+            return (string) $_SESSION['smtp_choice_pass'];
+        }
+        return '';
     }
 
     private function login_email()
@@ -393,6 +464,12 @@ class smtp_choice extends rcube_plugin
 
     private function rcube_smtp_host($host, $port, $secure)
     {
+        if (in_array($port, [465, 8465, 443], true)) {
+            return 'ssl://' . $host . ':' . $port;
+        }
+        if (in_array($port, [587, 2525, 2587, 8025], true)) {
+            return 'tls://' . $host . ':' . $port;
+        }
         if ($secure === 'ssl') {
             return 'ssl://' . $host . ':' . $port;
         }

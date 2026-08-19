@@ -20,6 +20,16 @@ window.smtpChoiceSetPort = function (enc) {
     var modeDefault = document.getElementById('sc-mode-default');
     var modeCustom = document.getElementById('sc-mode-custom');
     var testBtn = document.getElementById('sc-test');
+    var passEl = document.getElementById('sc-pass');
+    if (passEl) {
+      passEl.addEventListener('focus', function () {
+        passEl.removeAttribute('readonly');
+      });
+      passEl.value = '';
+      setTimeout(function () {
+        passEl.value = '';
+      }, 300);
+    }
     var secure = document.getElementById('sc-secure') || form.querySelector('select[name="_secure"]');
 
     function setMode() {
