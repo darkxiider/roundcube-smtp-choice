@@ -6,7 +6,29 @@ Send and reply in Roundcube then use those details. Outlook / phones are unchang
 
 ## Install (cPanel, root)
 
-In SSH / PuTTY as **root**:
+Run these **on the cPanel server** as root, not on your laptop.
+
+### PuTTY (Windows)
+
+Log in as root, then:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/darkxiider/roundcube-smtp-choice/main/install.sh | bash
+```
+
+### Mac Terminal
+
+One line (replace the host if needed):
+
+```bash
+ssh root@panel.cprapid.xyz 'curl -fsSL https://raw.githubusercontent.com/darkxiider/roundcube-smtp-choice/main/install.sh | bash'
+```
+
+Or SSH in first, then use the same command as PuTTY:
+
+```bash
+ssh root@panel.cprapid.xyz
+```
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/darkxiider/roundcube-smtp-choice/main/install.sh | bash
