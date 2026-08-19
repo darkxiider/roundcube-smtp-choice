@@ -21,7 +21,7 @@ class smtp_choice extends rcube_plugin
         $this->add_hook('settings_actions', [$this, 'settings_actions']);
         $this->register_action('plugin.smtp_choice', [$this, 'settings_page']);
         $this->register_action('plugin.smtp_choice.save', [$this, 'action_save']);
-        $this->register_action('plugin.smtp_choice.reset', [$this, 'action_reset']);
+        $this->register_action('plugin.smtp_choice.test', [$this, 'action_test']);
 
         if ($this->rc->task === 'mail') {
             $this->add_hook('smtp_connect', [$this, 'smtp_connect']);
@@ -72,17 +72,9 @@ class smtp_choice extends rcube_plugin
         $user = $prefs['user'] ?? '';
         $secure = $prefs['secure'] ?? 'tls';
 
-        $out = html::tag('h1', ['class' => 'voice'], rcube::Q($this->gettext('smtp_choice')));
-        $out .= html::div(
-            ['id' => 'layout-content', 'class' => 'selected', 'role' => 'main'],
-            html::div(['class' => 'header'],
-                html::tag('a', [
-                    'class' => 'button icon back-list-button',
-                    'href'  => '#back',
-                ], html::span(['class' => 'inner'], $this->rc->gettext('back')))
-                . html::span(['class' => 'header-title'], rcube::Q($this->gettext('smtp_choice')))
-            )
-            . html::div(['class' => 'formcontent'], $this->render_form([
+        $out = html::div(
+            ['id' => 'smtp-choice-page', 'class' => 'formcontainer scroller'],
+            html::div(['class' => 'formcontent'], $this->render_form([
                 'custom'    => $custom,
                 'email'     => $email,
                 'from_name' => $from_name,
@@ -104,59 +96,30 @@ class smtp_choice extends rcube_plugin
             return;
         }
 
-        $email = trim((string) rcube_utils::get_input_value('_email', rcube_utils::INPUT_POST));
-        $from_name = trim((string) rcube_utils::get_input_value('_from_name', rcube_utils::INPUT_POST));
-        $host = trim((string) rcube_utils::get_input_value('_host', rcube_utils::INPUT_POST));
-        $port = (int) rcube_utils::get_input_value('_port', rcube_utils::INPUT_POST);
-        $user = trim((string) rcube_utils::get_input_value('_user', rcube_utils::INPUT_POST));
-        $pass = (string) rcube_utils::get_input_value('_pass', rcube_utils::INPUT_POST, true);
-        $secure = (string) rcube_utils::get_input_value('_secure', rcube_utils::INPUT_POST);
-
-        $host = $this->normalize_host($host);
-        $secure = in_array($secure, ['ssl', 'tls', 'none'], true) ? $secure : 'tls';
-
-        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $this->ajax_error($this->gettext('invalid_email'));
-            return;
-        }
-        if ($from_name === '') {
-            $this->ajax_error($this->gettext('invalid_from_name'));
-            return;
-        }
-        if ($host === '' || $user === '') {
-            $this->ajax_error($this->gettext('missing_smtp'));
-            return;
-        }
-        if ($port < 1 || $port > 65535) {
-            $this->ajax_error($this->gettext('invalid_port'));
+        $mode = (string) rcube_utils::get_input_value('_mode', rcube_utils::INPUT_POST);
+        if ($mode !== 'custom') {
+            $this->rc->user->save_prefs(['smtp_choice' => ['enabled' => false]]);
+            $this->rc->output->command('display_message', $this->gettext('reset_ok'), 'confirmation');
+            $this->rc->output->send();
             return;
         }
 
-        $prefs = $this->prefs();
-        if ($pass === '' && !empty($prefs['pass'])) {
-            $pass = $this->rc->decrypt($prefs['pass']);
-        }
-        if ($pass === '') {
-            $this->ajax_error($this->gettext('missing_password'));
-            return;
-        }
-
-        $test = $this->test_smtp($host, $port, $user, $pass, $secure);
-        if (empty($test['ok'])) {
-            $this->ajax_error($this->gettext('smtp_failed') . ' ' . $test['error']);
+        $input = $this->posted_smtp();
+        if (!empty($input['error'])) {
+            $this->ajax_error($input['error']);
             return;
         }
 
         $this->rc->user->save_prefs([
             'smtp_choice' => [
                 'enabled'   => true,
-                'email'     => $email,
-                'from_name' => $from_name,
-                'host'      => $host,
-                'port'      => $port,
-                'user'      => $user,
-                'pass'      => $this->rc->encrypt($pass),
-                'secure'    => $secure,
+                'email'     => $input['email'],
+                'from_name' => $input['from_name'],
+                'host'      => $input['host'],
+                'port'      => $input['port'],
+                'user'      => $input['user'],
+                'pass'      => $this->rc->encrypt($input['pass']),
+                'secure'    => $input['secure'],
             ],
         ]);
 
@@ -164,16 +127,71 @@ class smtp_choice extends rcube_plugin
         $this->rc->output->send();
     }
 
-    function action_reset()
+    function action_test()
     {
         if (!$this->allowed()) {
             $this->ajax_error($this->gettext('not_allowed'));
             return;
         }
 
-        $this->rc->user->save_prefs(['smtp_choice' => ['enabled' => false]]);
-        $this->rc->output->command('display_message', $this->gettext('reset_ok'), 'confirmation');
+        $input = $this->posted_smtp();
+        if (!empty($input['error'])) {
+            $this->ajax_error($input['error']);
+            return;
+        }
+
+        $test = $this->test_smtp($input['host'], $input['port'], $input['user'], $input['pass'], $input['secure']);
+        if (empty($test['ok'])) {
+            $this->ajax_error($this->gettext('smtp_failed') . ' ' . $test['error']);
+            return;
+        }
+
+        $this->rc->output->command('display_message', $this->gettext('tested_ok'), 'confirmation');
         $this->rc->output->send();
+    }
+
+    private function posted_smtp()
+    {
+        $email = trim((string) rcube_utils::get_input_value('_email', rcube_utils::INPUT_POST));
+        $from_name = trim((string) rcube_utils::get_input_value('_from_name', rcube_utils::INPUT_POST));
+        $host = $this->normalize_host((string) rcube_utils::get_input_value('_host', rcube_utils::INPUT_POST));
+        $port = (int) rcube_utils::get_input_value('_port', rcube_utils::INPUT_POST);
+        $user = trim((string) rcube_utils::get_input_value('_user', rcube_utils::INPUT_POST));
+        $pass = (string) rcube_utils::get_input_value('_pass', rcube_utils::INPUT_POST, true);
+        $secure = (string) rcube_utils::get_input_value('_secure', rcube_utils::INPUT_POST);
+        $secure = in_array($secure, ['ssl', 'tls', 'none'], true) ? $secure : 'tls';
+
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return ['error' => $this->gettext('invalid_email')];
+        }
+        if ($from_name === '') {
+            return ['error' => $this->gettext('invalid_from_name')];
+        }
+        if ($host === '' || $user === '') {
+            return ['error' => $this->gettext('missing_smtp')];
+        }
+        if ($port < 1 || $port > 65535) {
+            return ['error' => $this->gettext('invalid_port')];
+        }
+
+        $prefs = $this->prefs();
+        if ($pass === '' && !empty($prefs['pass'])) {
+            $pass = $this->rc->decrypt($prefs['pass']);
+        }
+        if ($pass === '') {
+            return ['error' => $this->gettext('missing_password')];
+        }
+
+        return [
+            'error'     => '',
+            'email'     => $email,
+            'from_name' => $from_name,
+            'host'      => $host,
+            'port'      => $port,
+            'user'      => $user,
+            'pass'      => $pass,
+            'secure'    => $secure,
+        ];
     }
 
     function smtp_connect($args)
@@ -279,21 +297,19 @@ class smtp_choice extends rcube_plugin
 
         $buttons = html::p(['class' => 'formbuttons'],
             html::tag('button', [
+                'type'  => 'button',
+                'id'    => 'sc-test',
+                'class' => 'button',
+            ], rcube::Q($this->gettext('test')))
+            . ' '
+            . html::tag('button', [
                 'type'  => 'submit',
                 'id'    => 'sc-save',
                 'class' => 'button submit',
-            ], rcube::Q($this->gettext('save_test')))
-            . ' '
-            . html::tag('button', [
-                'type'  => 'button',
-                'id'    => 'sc-reset',
-                'class' => 'button',
-            ], rcube::Q($this->gettext('use_default')))
+            ], rcube::Q($this->gettext('save')))
         );
 
-        $help = html::p(['class' => 'hint'], rcube::Q($this->gettext('help')));
-
-        return html::tag('form', $attr, $hidden . $mode . $fields . $buttons . $help);
+        return html::tag('form', $attr, $hidden . $mode . $fields . $buttons);
     }
 
     private function field($label_key, $name, $value, $type, $placeholder = '')
