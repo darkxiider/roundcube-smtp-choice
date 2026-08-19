@@ -35,6 +35,10 @@ class smtp_choice extends rcube_plugin
             return $args;
         }
 
+        if (!isset($args['actions']) || !is_array($args['actions'])) {
+            $args['actions'] = [];
+        }
+
         $args['actions'][] = [
             'action' => 'plugin.smtp_choice',
             'class'  => 'smtp-choice',
@@ -226,10 +230,14 @@ class smtp_choice extends rcube_plugin
     private function render_form($data)
     {
         $attr = ['id' => 'smtp-choice-form', 'class' => 'propform', 'method' => 'post', 'action' => '#'];
-        $hidden = html::hidden('_token', $this->rc->get_request_token());
+        $hidden = html::tag('input', [
+            'type'  => 'hidden',
+            'name'  => '_token',
+            'value' => $this->rc->get_request_token(),
+        ]);
 
         $mode = html::div(['class' => 'propform-field'],
-            html::label(null, rcube::Q($this->gettext('mode')))
+            html::label([], rcube::Q($this->gettext('mode')))
             . html::div(['class' => 'smtp-choice-radios'],
                 html::tag('label', ['class' => 'smtp-choice-radio'],
                     html::tag('input', [
