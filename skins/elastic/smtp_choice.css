@@ -27,10 +27,20 @@
 
 #smtp-choice-form input[type="text"],
 #smtp-choice-form input[type="password"],
-#smtp-choice-form input[type="number"],
 #smtp-choice-form select {
   width: 100%;
   max-width: 28em;
+}
+
+#sc-port {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+#sc-port::-webkit-outer-spin-button,
+#sc-port::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .smtp-choice-radios {

@@ -12,6 +12,9 @@ window.rcmail && rcmail.addEventListener('init', function () {
   var modeDefault = document.getElementById('sc-mode-default');
   var modeCustom = document.getElementById('sc-mode-custom');
   var testBtn = document.getElementById('sc-test');
+  var secure = document.getElementById('sc-secure');
+  var port = document.getElementById('sc-port');
+  var defaultPorts = { tls: '587', ssl: '465', none: '25' };
 
   function setMode() {
     var custom = modeCustom && modeCustom.checked;
@@ -45,6 +48,12 @@ window.rcmail && rcmail.addEventListener('init', function () {
     modeCustom.addEventListener('change', setMode);
   }
   setMode();
+
+  if (secure && port) {
+    secure.addEventListener('change', function () {
+      port.value = defaultPorts[secure.value] || '587';
+    });
+  }
 
   form.addEventListener('submit', function (e) {
     e.preventDefault();

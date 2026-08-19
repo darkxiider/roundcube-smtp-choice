@@ -282,7 +282,6 @@ class smtp_choice extends rcube_plugin
             $this->field('email', '_email', $data['email'], 'text')
             . $this->field('from_name', '_from_name', $data['from_name'], 'text')
             . $this->field('smtp_host', '_host', $data['host'], 'text', 'smtp.example.com')
-            . $this->field('smtp_port', '_port', $data['port'], 'number')
             . $this->field('smtp_user', '_user', $data['user'], 'text')
             . $this->field('smtp_pass', '_pass', '', 'password', !empty($data['has_pass']) ? $this->gettext('password_keep') : '')
             . html::div(['class' => 'propform-field'],
@@ -293,6 +292,7 @@ class smtp_choice extends rcube_plugin
                     . $this->option('none', $data['secure'], $this->gettext('secure_none'))
                 )
             )
+            . $this->field('smtp_port', '_port', $data['port'], 'text')
         );
 
         $buttons = html::p(['class' => 'formbuttons'],
@@ -325,8 +325,9 @@ class smtp_choice extends rcube_plugin
             $input_attr['placeholder'] = $placeholder;
         }
         if ($name === '_port') {
-            $input_attr['min'] = '1';
-            $input_attr['max'] = '65535';
+            $input_attr['inputmode'] = 'numeric';
+            $input_attr['pattern'] = '[0-9]*';
+            $input_attr['autocomplete'] = 'off';
         }
 
         return html::div(['class' => 'propform-field'],
