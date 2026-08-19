@@ -250,8 +250,8 @@ class smtp_choice extends rcube_plugin
         // Roundcube SMTP, never pass tls:// — Roundcube STARTTLS in connect()
         // and again in auth(), and SMTP2GO then returns 503.
         $host = $this->normalize_host((string) $prefs['host']);
-        $port = (int) ($prefs['port'] ?? 587);
-        $secure = (string) ($prefs['secure'] ?? 'tls');
+        $port = (int) ($prefs['port'] ?? 465);
+        $secure = (string) ($prefs['secure'] ?? 'ssl');
         $args['smtp_host'] = $this->rcube_smtp_host($host, $port, $secure);
         $args['smtp_user'] = (string) $prefs['user'];
         $args['smtp_pass'] = $pass;
@@ -272,15 +272,15 @@ class smtp_choice extends rcube_plugin
             return $args;
         }
 
-        $from = $name !== '' ? format_email_recipient($email, $name) : $email;
+        $from = $this->encoded_from($email, $name);
         $args['from'] = $from;
 
         if (isset($args['message']) && is_object($args['message'])) {
+            if (method_exists($args['message'], 'headers')) {
+                $args['message']->headers(['From' => $from, 'Reply-To' => $from], true);
+            }
             if (method_exists($args['message'], 'setFrom')) {
                 $args['message']->setFrom($email, $name);
-            }
-            elseif (method_exists($args['message'], 'headers')) {
-                $args['message']->headers(['From' => $from], true);
             }
         }
 
@@ -292,7 +292,7 @@ class smtp_choice extends rcube_plugin
             return $args;
         }
 
-        $raw = $this->message_rfc822($args['message'] ?? null);
+        $raw = $this->force_from_headers($this->message_rfc822($args['message'] ?? null), $email, $name);
         if ($raw === '') {
             $args['abort'] = true;
             $args['result'] = false;
@@ -303,10 +303,10 @@ class smtp_choice extends rcube_plugin
         $rcpts = $this->rcpt_list((string) ($args['mailto'] ?? ''), $raw);
         $sent = $this->smtp_deliver(
             $this->normalize_host((string) $prefs['host']),
-            (int) ($prefs['port'] ?? 587),
+            (int) ($prefs['port'] ?? 465),
             (string) $prefs['user'],
             $pass,
-            (string) ($prefs['secure'] ?? 'tls'),
+            (string) ($prefs['secure'] ?? 'ssl'),
             $email,
             $rcpts,
             $raw
@@ -360,7 +360,7 @@ class smtp_choice extends rcube_plugin
             $this->field('email', '_email', $data['email'], 'text')
             . $this->field('from_name', '_from_name', $data['from_name'], 'text')
             . $this->field('smtp_host', '_host', $data['host'], 'text', 'smtp.example.com')
-            .             $this->field('smtp_user', '_user', $data['user'], 'text')
+            . $this->field('smtp_user', '_user', $data['user'], 'text')
             . html::tag('input', [
                 'type'         => 'text',
                 'name'         => 'sc_trap_user',
@@ -743,6 +743,39 @@ class smtp_choice extends rcube_plugin
             }
         }
         return array_values($found);
+    }
+
+    private function encoded_from($email, $name)
+    {
+        $name = trim((string) $name);
+        if ($name === '') {
+            return $email;
+        }
+        if (function_exists('format_email_recipient')) {
+            return format_email_recipient($email, $name);
+        }
+        return sprintf('"%s" <%s>', addcslashes($name, '"\\'), $email);
+    }
+
+    private function force_from_headers($raw, $email, $name)
+    {
+        if (!is_string($raw) || trim($raw) === '') {
+            return '';
+        }
+        $from = $this->encoded_from($email, $name);
+        $raw = preg_replace("/(?<!\r)\n/", "\r\n", $raw);
+        $raw = preg_replace('/^Sender:(?:.|\r\n[ \t]+)*\r\n/im', '', $raw);
+        if (preg_match('/^From:/im', $raw)) {
+            $raw = preg_replace('/^From:(?:.|\r\n[ \t]+)*\r\n/im', 'From: ' . $from . "\r\n", $raw, 1);
+        } else {
+            $raw = 'From: ' . $from . "\r\n" . $raw;
+        }
+        if (preg_match('/^Reply-To:/im', $raw)) {
+            $raw = preg_replace('/^Reply-To:(?:.|\r\n[ \t]+)*\r\n/im', 'Reply-To: ' . $from . "\r\n", $raw, 1);
+        } else {
+            $raw = preg_replace('/^From:.*\r\n/im', '$0Reply-To: ' . $from . "\r\n", $raw, 1);
+        }
+        return $raw;
     }
 
     private function public_ip($ip)
