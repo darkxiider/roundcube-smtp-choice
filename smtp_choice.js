@@ -129,6 +129,28 @@ window.smtpChoiceSetPort = function (enc) {
         setMode();
       });
     }
+
+    function removeFooterClones() {
+      var testClone = document.getElementById('sc-test-clone');
+      var saveClone = document.getElementById('sc-save-clone');
+      var wrap = (testClone && testClone.parentNode) || (saveClone && saveClone.parentNode);
+      if (wrap && wrap.classList && wrap.classList.contains('buttons')) {
+        if (wrap.parentNode) {
+          wrap.parentNode.removeChild(wrap);
+        }
+        return;
+      }
+      if (testClone && testClone.parentNode) {
+        testClone.parentNode.removeChild(testClone);
+      }
+      if (saveClone && saveClone.parentNode) {
+        saveClone.parentNode.removeChild(saveClone);
+      }
+    }
+
+    removeFooterClones();
+    setTimeout(removeFooterClones, 0);
+    setTimeout(removeFooterClones, 250);
   }
 
   if (window.rcmail) {

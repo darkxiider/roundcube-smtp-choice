@@ -374,7 +374,7 @@ class smtp_choice extends rcube_plugin
             . $this->field('smtp_port', '_port', $data['port'], 'text')
         );
 
-        $buttons = html::p(['class' => 'formbuttons'],
+        $buttons = html::p(['class' => 'smtp-choice-actions'],
             html::tag('button', [
                 'type'  => 'button',
                 'id'    => 'sc-test',
