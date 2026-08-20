@@ -71,7 +71,8 @@
 
 #sc-test-clone,
 #sc-save-clone,
-.footer .buttons:has(#sc-test-clone),
-#layout-footer .buttons:has(#sc-test-clone) {
+.footer.content-frame-navigation,
+#layout-content > .footer.menu.toolbar,
+#layout-footer .content-frame-navigation {
   display: none !important;
 }
